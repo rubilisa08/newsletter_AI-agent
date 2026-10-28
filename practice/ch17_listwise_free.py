@@ -12,7 +12,7 @@ from pathlib import Path
 import feedparser, requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from skeleton import score, strip_tags
+from graph import score, strip_tags
 
 UA = {"User-Agent": "Mozilla/5.0 (newsletter-agent-course)"}
 FEEDS = [("TechCrunch", "https://techcrunch.com/category/artificial-intelligence/feed/"),

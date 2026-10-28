@@ -3,7 +3,7 @@
     uv run python scripts/trace_run.py
 
 만드는 파일 두 개:
-  WORKFLOW.md                 그래프 구조 그림 — skeleton.py 에서 그대로 뽑아 늘 실제 코드와 같다
+  WORKFLOW.md                 그래프 구조 그림 — graph.py 에서 그대로 뽑아 늘 실제 코드와 같다
   logs/run-YYYYMMDD-HHMM.md   이번 실행 기록 — 노드가 어떤 순서로 돌았고, 어느 칸에 무엇을 남겼는지
 
 .md 안의 ```mermaid 그림은 GitHub, VS Code 미리보기 등에서 도형으로 보인다.
@@ -16,14 +16,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from skeleton import INIT, build
+from graph import INIT, build
 
 ROLE = {
     "collect": "① 수집 — RSS·Atom 10곳 + Hacker News API에서 24시간 안 기사를 모은다",
     "select":  "② 선별 — 40건씩 예선 8건, 본선 5건 (무료 키워드 점수)",
     "report":  "③ 취재·요약 — 고른 기사 수만큼 펼쳐 본문 600자 관문을 보고 초안을 만든다",
     "verify":  "④ 검수 — 형식이 틀린 초안을 버리고 통과한 것만 verified 칸에 담는다",
-    "publish": "⑤ 발행 — verified 칸을 Discord로 보낸다 (아직 빈 노드)",
+    "publish": "⑤ 발행 — verified 칸을 embed 카드로 Discord에 보낸다 (DRY_RUN=1 이면 보내지 않음)",
 }
 
 
@@ -44,7 +44,7 @@ def main() -> int:
 
     (ROOT / "WORKFLOW.md").write_text(
         "# 뉴스레터 워크플로\n\n"
-        "`scripts/trace_run.py` 가 skeleton.py 의 그래프에서 자동으로 만든 그림이에요. "
+        "`scripts/trace_run.py` 가 graph.py 의 그래프에서 자동으로 만든 그림이에요. "
         "점선(`-.->`)은 기사 수만큼 펼쳐지는 엣지(Send)예요.\n\n"
         f"```mermaid\n{diagram}\n```\n\n"
         "| 노드 | 하는 일 |\n|---|---|\n"

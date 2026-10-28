@@ -1,4 +1,4 @@
-# 15장 실습 · 무료판 — 같은 12건을 OpenAI 대신 skeleton.py 의 키워드 점수로 따로따로 매긴다
+# 15장 실습 · 무료판 — 같은 12건을 OpenAI 대신 graph.py 의 키워드 점수로 따로따로 매긴다
 #   uv run python practice/ch15_pointwise_free.py
 import sys
 from collections import Counter
@@ -7,7 +7,7 @@ from pathlib import Path
 import feedparser, requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from skeleton import score, strip_tags
+from graph import score, strip_tags
 
 UA = {"User-Agent": "Mozilla/5.0 (newsletter-agent-course)"}
 

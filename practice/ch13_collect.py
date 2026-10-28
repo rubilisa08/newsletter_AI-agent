@@ -2,13 +2,13 @@
 #   uv run python practice/ch13_collect.py
 #
 # 노트북에서는 collect를 다시 정의하면 globals()로 새 함수가 들어간다.
-# 파일에서는 skeleton 모듈의 collect 자리에 이 함수를 넣어 같은 효과를 낸다.
-# 실제로 쓰는 개선판(소스 11곳 · AI타임스 중복 판정 수정 · 한국 시각)은 skeleton.py 에 있다.
+# 파일에서는 graph 모듈의 collect 자리에 이 함수를 넣어 같은 효과를 낸다.
+# 실제로 쓰는 개선판(소스 11곳 · AI타임스 중복 판정 수정 · 한국 시각)은 graph.py 에 있다.
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import skeleton
+import graph
 
 import feedparser, requests, re
 from datetime import datetime, timedelta, timezone
@@ -52,9 +52,9 @@ def collect(s: dict) -> dict:                   # ① 자료 수집 — 빈 노�
             "log": [f"① 수집   {s['hours']}시간 time window · {len(items)}건"
                     + (f" · 응답 없음 {dead}" if dead else "")]}
 
-skeleton.collect = collect                      # 노드를 갈아 끼운다 — build()가 이 이름으로 찾아 붙인다
+graph.collect = collect                      # 노드를 갈아 끼운다 — build()가 이 이름으로 찾아 붙인다
 
-out = skeleton.run()
+out = graph.run()
 for line in out["log"]:                         # 그래프는 그대로, 노드만 바뀌었다
     print(line)
 

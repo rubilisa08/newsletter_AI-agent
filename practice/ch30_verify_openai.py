@@ -1,8 +1,8 @@
 # 30장 실습 · 검수 노드를 채우고 다시 돌리기 (강의 원본 · OpenAI 유료 호출: 초안 수만큼)
 #   uv run python practice/ch30_verify_openai.py
 # ⚠ .env 의 OPENAI_API_KEY 로 호출하므로 실행하면 OpenAI 계정에 요금이 청구된다.
-#   skeleton.py 에는 같은 구조(Verdict · verified 칸 · verify)에 check 만 무료로 바꾼 버전이 들어 있다.
-#   Brief 의 verified 칸과 INIT 은 skeleton.py 에 이미 더해 두었다.
+#   graph.py 에는 같은 구조(Verdict · verified 칸 · verify)에 check 만 무료로 바꾼 버전이 들어 있다.
+#   Brief 의 verified 칸과 INIT 은 graph.py 에 이미 더해 두었다.
 import sys
 from pathlib import Path
 
@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-import skeleton
+import graph
 
 load_dotenv(ROOT / ".env")
 client = OpenAI(default_headers={"Accept-Encoding": "gzip, deflate"})
@@ -41,7 +41,7 @@ def verify(s: dict) -> dict:                  # ④ 검수 — 빈 노드를 갈
             "log": [f"④ 검수   {len(s['drafted'])} → {len(kept)}건"
                     + (f" · 불합격 {[x['source'] for x in dropped]}" if dropped else "")]}
 
-skeleton.verify = verify                       # 노드를 갈아 끼운다
+graph.verify = verify                       # 노드를 갈아 끼운다
 
-for line in skeleton.run()["log"]:
+for line in graph.run()["log"]:
     print(line)

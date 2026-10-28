@@ -1,7 +1,7 @@
 # 25장 실습 · 취재 노드를 채우고 기사 수만큼 펼치기 (강의 원본 · OpenAI 유료 호출: 고른 기사 수만큼)
 #   uv run python practice/ch25_report_openai.py
 # ⚠ .env 의 OPENAI_API_KEY 로 호출하므로 실행하면 OpenAI 계정에 요금이 청구된다.
-#   skeleton.py 에는 같은 구조(Send · ReportIn · fan_report)에 draft 만 무료로 바꾼 버전이 들어 있다.
+#   graph.py 에는 같은 구조(Send · ReportIn · fan_report)에 draft 만 무료로 바꾼 버전이 들어 있다.
 import sys
 from pathlib import Path
 from typing import TypedDict
@@ -15,8 +15,8 @@ from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-import skeleton
-from skeleton import Brief
+import graph
+from graph import Brief
 
 load_dotenv(ROOT / ".env")
 client = OpenAI(default_headers={"Accept-Encoding": "gzip, deflate"})
@@ -60,8 +60,8 @@ def report(s: ReportIn) -> dict:               # ③ 요약 — 기사 한 건�
 
 def build():                                   # 엣지 한 줄이 팬아웃으로 바뀐다
     g = StateGraph(Brief)
-    nodes = {"collect": skeleton.collect, "select": skeleton.select, "report": report,
-             "verify": skeleton.verify, "publish": skeleton.publish}
+    nodes = {"collect": graph.collect, "select": graph.select, "report": report,
+             "verify": graph.verify, "publish": graph.publish}
     for name in ("collect", "select", "report", "verify", "publish"):
         g.add_node(name, nodes[name])
     g.add_edge(START, "collect")
@@ -72,5 +72,5 @@ def build():                                   # 엣지 한 줄이 팬아웃으�
     g.add_edge("publish", END)
     return g
 
-for line in build().compile().invoke(skeleton.INIT)["log"]:
+for line in build().compile().invoke(graph.INIT)["log"]:
     print(line)

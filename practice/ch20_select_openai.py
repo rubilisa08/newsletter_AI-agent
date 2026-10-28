@@ -1,7 +1,7 @@
 # 20장 실습 · 선별 노드를 채우고 그래프를 다시 돌리기 (강의 원본 · OpenAI 유료 호출: 예선 묶음 수 + 본선 1번)
 #   uv run python practice/ch20_select_openai.py
 # ⚠ .env 의 OPENAI_API_KEY 로 호출하므로 실행하면 OpenAI 계정에 요금이 청구된다.
-#   skeleton.py 에는 같은 구조에 ask_picks 만 무료(키워드 점수)로 바꾼 버전이 들어 있다.
+#   graph.py 에는 같은 구조에 ask_picks 만 무료(키워드 점수)로 바꾼 버전이 들어 있다.
 import sys
 from pathlib import Path
 
@@ -10,8 +10,8 @@ from openai import OpenAI
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-import skeleton
-from skeleton import Shortlist                  # 19장 스키마 (Pick · Shortlist)
+import graph
+from graph import Shortlist                  # 19장 스키마 (Pick · Shortlist)
 
 load_dotenv(ROOT / ".env")
 client = OpenAI(default_headers={"Accept-Encoding": "gzip, deflate"})
@@ -44,7 +44,7 @@ def select(s: dict) -> dict:                   # ② 중요도 선별 — 빈 �
     return {"picked": [survivors[p.index] for p in finals],
             "log": [f"② 선별   {len(items)} → 예선 {len(survivors)} → {len(finals)}건"]}
 
-skeleton.select = select                        # 노드를 갈아 끼운다
+graph.select = select                        # 노드를 갈아 끼운다
 
-for line in skeleton.run()["log"]:
+for line in graph.run()["log"]:
     print(line)

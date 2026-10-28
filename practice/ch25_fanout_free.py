@@ -1,4 +1,4 @@
-# 25장 실습 · 무료판 — skeleton.py 그래프에서 report가 기사 수만큼 펼쳐지는 모습을 본다
+# 25장 실습 · 무료판 — graph.py 그래프에서 report가 기사 수만큼 펼쳐지는 모습을 본다
 #   uv run python practice/ch25_fanout_free.py
 #
 # invoke()는 마지막 State만 돌려주지만, stream()은 노드가 끝날 때마다 하나씩 알려 준다.
@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from skeleton import INIT, build
+from graph import INIT, build
 
 graph = build().compile()
 

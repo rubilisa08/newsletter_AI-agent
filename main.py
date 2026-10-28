@@ -1,7 +1,7 @@
 """스케줄러용 실행 진입점.
 
 Windows 작업 스케줄러가 매일 07:30에 이 파일을 실행한다.
-그래프 자체는 skeleton.py에 있고, 여기서는 실행 결과의 log를 logs/YYYY-MM-DD.log 에 남긴다.
+그래프 자체는 graph.py에 있고, 여기서는 실행 결과의 log를 logs/YYYY-MM-DD.log 에 남긴다.
 """
 
 import logging
@@ -11,7 +11,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from skeleton import run
+from graph import run
 
 ROOT = Path(__file__).resolve().parent
 

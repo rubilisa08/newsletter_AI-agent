@@ -11,7 +11,7 @@ import feedparser, requests
 from pydantic import BaseModel, Field, ValidationError
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from skeleton import matched, score, strip_tags
+from graph import matched, score, strip_tags
 
 class Pick(BaseModel):
     index: int = Field(description="후보 목록에서의 번호")

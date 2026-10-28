@@ -1,7 +1,7 @@
 # 24장 실습 · 무료판 — 같은 기사 세 건을 취재해 Draft 세 칸을 LLM 없이 채운다
 #   uv run python practice/ch24_report_free.py
 #
-# 본문 추출(trafilatura)과 G1 기준선은 강의와 같다. LLM이 쓰던 세 칸은 skeleton.py 의 무료 draft()로 채운다:
+# 본문 추출(trafilatura)과 G1 기준선은 강의와 같다. LLM이 쓰던 세 칸은 graph.py 의 무료 draft()로 채운다:
 #   headline = 원래 제목 · summary = 피드가 준 요약 · why = 걸린 개발팀 키워드
 import re
 import sys
@@ -11,7 +11,7 @@ import feedparser, requests, trafilatura
 from pydantic import BaseModel, Field
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from skeleton import draft, strip_tags
+from graph import draft, strip_tags
 
 UA = {"User-Agent": "Mozilla/5.0 (newsletter-agent-course)"}
 
