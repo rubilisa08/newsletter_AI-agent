@@ -6,7 +6,10 @@ from urllib.parse import urlsplit
 
 import feedparser
 import requests
+import trafilatura
 from langgraph.graph import StateGraph, START, END
+from langgraph.types import Send
+from pydantic import BaseModel, Field
 
 class Brief(TypedDict):
     hours:     int                              # 수집 time window(시간)
@@ -16,23 +19,47 @@ class Brief(TypedDict):
     log:       Annotated[list, operator.add]    # 무슨 일이 있었는지
 
 UA = {"User-Agent": "Mozilla/5.0 (newsletter-agent-course)"}
-SOURCES = [
-    ("OpenAI",     "https://openai.com/blog/rss.xml"),
-    ("DeepMind",   "https://deepmind.google/blog/rss.xml"),
-    ("TechCrunch", "https://techcrunch.com/category/artificial-intelligence/feed/"),
-    ("The Verge",  "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml"),
-    ("AI타임스",    "https://www.aitimes.com/rss/allArticle.xml"),
+SOURCES = [                                     # RSS·Atom 피드 10곳 (사다리 ②칸)
+    # 1차 소스 — 사건 당사자가 직접 발표하는 곳
+    ("OpenAI",       "https://openai.com/blog/rss.xml"),
+    ("DeepMind",     "https://deepmind.google/blog/rss.xml"),
+    ("Google AI",    "https://blog.google/technology/ai/rss/"),
+    ("Hugging Face", "https://huggingface.co/blog/feed.xml"),
+    ("AWS ML",       "https://aws.amazon.com/blogs/machine-learning/feed/"),
+    # 2차 소스 — 발표를 받아 쓰는 매체
+    ("TechCrunch",   "https://techcrunch.com/category/artificial-intelligence/feed/"),
+    ("The Verge",    "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml"),
+    ("MIT TR",       "https://www.technologyreview.com/feed/"),
+    ("AI타임스",      "https://www.aitimes.com/rss/allArticle.xml"),
+    ("전자신문",       "https://rss.etnews.com/04.xml"),             # AI·SW 섹션
 ]
+HN_API = "https://hn.algolia.com/api/v1/search_by_date"          # Hacker News 공개 API (사다리 ①칸)
+HN_MIN_POINTS = 20                                               # 이 점수 아래 글은 화제가 안 된 것으로 본다
 
 def strip_tags(s):
-    return re.sub(r"<[^>]+>", "", s or "").strip()
+    s = re.sub(r"<[^>]+>", " ", s or "")                   # 문단 태그 자리에 띄어쓰기
+    s = re.sub(r"([.!?])(?=[가-힣A-Z\"'“‘])", r"\1 ", s)   # "앞섰다.중국"처럼 붙은 문장 사이 (3.8 같은 숫자는 그대로)
+    return re.sub(r"\s+", " ", s).strip()
 
 KST = timezone(timedelta(hours=9))
 NAIVE_KST = {"AI타임스"}                       # 시간대 없이 한국 시각으로 적는 피드
 
 def published_at(entry, tz=timezone.utc):
-    t = entry.get("published_parsed")
+    t = entry.get("published_parsed") or entry.get("updated_parsed")   # Atom은 updated만 줄 때가 있다
     return datetime(*t[:6], tzinfo=tz) if t else None
+
+def collect_hn(cutoff):                        # Hacker News는 RSS 대신 공개 API로 가져온다
+    r = requests.get(HN_API, timeout=20, params={
+        "query": "AI", "tags": "story", "hitsPerPage": 50,
+        "numericFilters": f"created_at_i>{int(cutoff.timestamp())},points>={HN_MIN_POINTS}"})
+    r.raise_for_status()
+    items = []
+    for h in r.json()["hits"]:
+        url = h.get("url") or f"https://news.ycombinator.com/item?id={h['objectID']}"
+        items.append({"title": h["title"], "url": url, "source": "Hacker News",
+                      "at": datetime.fromtimestamp(h["created_at_i"], timezone.utc),
+                      "summary": f"Hacker News {h.get('points', 0)}점 · 댓글 {h.get('num_comments') or 0}개"})
+    return items
 
 def url_key(link):                             # utm_ 같은 추적용 꼬리표만 떼고 비교
     parts = urlsplit(link)
@@ -58,45 +85,112 @@ def collect(s: dict) -> dict:                  # ① 자료 수집 — 2부(13�
             seen.add(key)
             items.append({"title": e.title, "url": e.link, "source": name, "at": at,
                           "summary": strip_tags(e.get("summary", ""))[:300]})
+    try:
+        for it in collect_hn(cutoff):
+            key = url_key(it["url"])
+            if key not in seen:                 # 매체 기사와 같은 링크면 한 번만
+                seen.add(key)
+                items.append(it)
+    except Exception:
+        dead.append("Hacker News")
     return {"collected": items,
             "log": [f"① 수집   {s['hours']}시간 time window · {len(items)}건"
                     + (f" · 응답 없음 {dead}" if dead else "")]}
 
-TARGET, PER_SOURCE = 5, 2                       # 최종 발행 건수, 한 소스에서 최대 몇 건
+BATCH, TARGET = 40, 5          # 예선 묶음 크기, 최종 발행 건수
+PER_SOURCE = 2                 # 본선에서 한 매체가 차지할 수 있는 최대 칸 수
 
-# 무료 버전 — LLM 대신 키워드 점수로 고른다. 나중에 3부(20장)의 OpenAI 버전으로 갈아 끼운다.
-# 기준은 강의의 CRITERIA: "개발팀이 일하는 방식이 바뀔 만한가", 홍보성 소식은 버린다.
-SCORES = [
-    (r"\bAPIs?\b|\bSDK\b|오픈\s?API",                                    3),
-    (r"\bopen[- ]?(sourc\w*|weights?)\b|오픈소스|오픈 웨이트",                  2),
-    (r"\b(release[sd]?|launch(es|ed)?)\b|출시|공개",                          1),
-    (r"\b(pric\w*|rate limits?|deprecat\w*)\b|가격|요금|한도|종료",           3),
-    (r"\b(developers?|coding|code|agents?|GitHub|benchmark\w*)\b|개발자|코딩|에이전트", 2),
-    (r"\b(GPT|Claude|Gemini|Llama|Qwen|DeepSeek|Mistral|LLM)\w*",           1),
-    (r"\b(raises?|funding|valuation|IPO|investors?|VCs?)\b|투자|유치|상장|MOU|협약|수상", -3),
-    (r"\b(sues?|lawsuit)\b|소송",                                          -1),
-    (r"\[게시판\]|\[인사\]|단신",                                           -9),  # 여러 소식을 모은 목록 기사
+class Pick(BaseModel):                          # 19장 구조화 출력 스키마
+    index: int = Field(description="후보 목록에서의 번호")
+    reason: str = Field(description="왜 골랐는지 한 문장")
+    event: str = Field(description="이 기사가 다루는 사건을 짧은 라벨로. 같은 사건이면 같은 라벨")
+
+class Shortlist(BaseModel):
+    picks: list[Pick]
+
+# 무료 버전 — LLM 대신 키워드 점수로 고른다. 유료로 바꿀 땐 ask_picks 만 20장 코드로 갈아 끼운다
+# (practice/ch20_select_openai.py). 기준은 강의의 CRITERIA를 키워드로 옮긴 것:
+# "개발팀이 일하는 방식이 바뀔 만한가", "도구·API의 가격·한도·정책 변화", 홍보성 소식은 버린다.
+SCORES = [                                     # (패턴, 점수, report의 why에 쓸 이름)
+    (r"\bAPIs?\b|\bSDK\b|오픈\s?API",                                    3, "API·SDK"),
+    (r"\bopen[- ]?(sourc\w*|weights?)\b|오픈소스|오픈 웨이트",                  2, "오픈소스"),
+    (r"\b(release[sd]?|launch(es|ed)?)\b|출시|공개",                          1, "출시"),
+    (r"\b(pric\w*|rate limits?|deprecat\w*)\b|가격|요금|한도|종료",           3, "가격·한도"),
+    (r"\b(developers?|coding|code|agents?|GitHub|benchmark\w*)\b|개발자|코딩|에이전트", 2, "개발 도구"),
+    (r"\b(GPT|Claude|Gemini|Llama|Qwen|DeepSeek|Mistral|LLM)\w*",           1, "모델"),
+    (r"\b(raises?|funding|valuation|IPO|investors?|VCs?)\b|투자|유치|상장|MOU|협약|수상", -3, ""),
+    (r"\b(sues?|lawsuit)\b|소송",                                          -1, ""),
+    (r"\[게시판\]|\[인사\]|단신",                                           -9, ""),  # 여러 소식을 모은 목록 기사
 ]
 
-def score(item):
+def matched(item):
     text = f"{item['title']} {item['summary']}"
-    return sum(w for pat, w in SCORES if re.search(pat, text, re.IGNORECASE))
+    return [(w, label) for pat, w, label in SCORES if re.search(pat, text, re.IGNORECASE)]
 
-def select(s: dict) -> dict:                   # ② 중요도 선별 — 무료 키워드 버전
-    ranked = sorted(s["collected"], key=lambda it: (score(it), it["at"]), reverse=True)
-    picked, per_source = [], {}
-    for it in ranked:
-        if len(picked) == TARGET:
+def score(item):
+    return sum(w for w, _ in matched(item))
+
+def labels(item):                              # 걸린 개발팀 키워드 이름들
+    return list(dict.fromkeys(label for w, label in matched(item) if w > 0 and label))
+
+def ask_picks(items, n):                       # 무료 ask_picks — 20장과 같은 모양(Pick 목록)을 돌려준다
+    ranked = sorted(range(len(items)), key=lambda i: (score(items[i]), items[i]["at"]), reverse=True)
+    cap = PER_SOURCE if n <= TARGET else n     # 본선에서만 매체당 칸 수를 제한한다
+    picks, per_source = [], {}
+    for i in ranked:
+        if len(picks) == n:
             break
-        if per_source.get(it["source"], 0) >= PER_SOURCE:     # 한 매체가 다섯 칸을 다 차지하지 않게
+        src = items[i]["source"]
+        if per_source.get(src, 0) >= cap:
             continue
-        per_source[it["source"]] = per_source.get(it["source"], 0) + 1
-        picked.append({**it, "score": score(it)})
-    return {"picked": picked,
-            "log": [f"② 선별   {len(s['collected'])} → {len(picked)}건 (키워드 점수)"]}
+        per_source[src] = per_source.get(src, 0) + 1
+        found = labels(items[i])
+        picks.append(Pick(index=i,
+                          reason=f"키워드: {' · '.join(found)}" if found else "개발팀 키워드 없음",
+                          event=found[0] if found else "기타"))
+    return [p for p in picks if 0 <= p.index < len(items)]      # 없는 번호는 버린다
 
-def report(s: dict) -> dict:                   # ③ 요약       — 섹션 6에서 채운다
-    return {"drafted": [], "log": [f"③ 취재   {len(s['picked'])}건 (빈 노드)"]}
+def select(s: dict) -> dict:                   # ② 중요도 선별 — 20장 구조 그대로
+    items = s["collected"]
+    survivors = []
+    for i in range(0, len(items), BATCH):       # 예선 — 묶음마다 여덟 건
+        chunk = items[i:i + BATCH]
+        survivors += [chunk[p.index] for p in ask_picks(chunk, 8)]
+    finals = ask_picks(survivors, TARGET)       # 본선 — 한 화면에 놓고 다섯 건
+    return {"picked": [survivors[p.index] for p in finals],
+            "log": [f"② 선별   {len(items)} → 예선 {len(survivors)} → {len(finals)}건"]}
+
+MIN_BODY = 600                                  # 요약을 쓰려면 최소 이 정도는 있어야 한다 (11장 G1)
+
+class ReportIn(TypedDict):                      # 워커가 받는 것은 기사 하나뿐
+    item: dict
+
+def extract_body(url):
+    d = trafilatura.fetch_url(url)
+    return trafilatura.extract(d) if d else None
+
+# 무료 버전 — LLM 없이 피드가 준 요약을 그대로 쓴다. 나중에 4부(25장)의 OpenAI draft()로 갈아 끼운다.
+# 본문은 G1 관문과 검수용으로만 쓰고 발행하지 않는다 (제목·요약·원문 링크만 재배포).
+def draft(item, body):
+    found = labels(item)
+    return {"headline": item["title"],
+            "summary":  item["summary"],
+            "why":      f"개발팀 관련: {' · '.join(found)}" if found else ""}
+
+def fan_report(s: dict):                        # 기사 수만큼 워커를 펼친다
+    return [Send("report", {"item": it}) for it in s["picked"]]
+
+def report(s: ReportIn) -> dict:               # ③ 취재·요약 — 기사 한 건을 맡는다
+    it = s["item"]
+    try:
+        body = extract_body(it["url"])
+    except Exception:
+        body = None
+    if not body or len(body) < MIN_BODY:
+        return {"drafted": [],
+                "log": [f"   취재 제외 {it['source']} · 본문 {len(body or '')}자"]}
+    return {"drafted": [{**it, "body": body[:6000], **draft(it, body)}],
+            "log": [f"   취재 {it['source']} · 본문 {len(body)}자"]}
 
 def verify(s: dict) -> dict:                   # ④ 검수       — 섹션 7에서 채운다
     return {"log": [f"④ 검수   {len(s['drafted'])}건 (빈 노드)"]}
@@ -110,7 +204,7 @@ def build():                                    # 노드를 이름으로 찾아 
         g.add_node(name, globals()[name])
     g.add_edge(START, "collect")
     g.add_edge("collect", "select")
-    g.add_edge("select", "report")
+    g.add_conditional_edges("select", fan_report, ["report"])   # 기사 수만큼 report를 펼친다
     g.add_edge("report", "verify")
     g.add_edge("verify", "publish")
     g.add_edge("publish", END)
