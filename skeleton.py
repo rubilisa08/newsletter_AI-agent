@@ -16,6 +16,7 @@ class Brief(TypedDict):
     collected: list                             # ① 수집한 기사
     picked:    list                             # ② 선별해 남긴 다섯 건
     drafted:   Annotated[list, operator.add]    # ③ 취재한 초안 — 워커들이 나눠 채운다
+    verified:  list                             # ④ 검수를 통과한 것 (31장에서 더한 칸)
     log:       Annotated[list, operator.add]    # 무슨 일이 있었는지
 
 UA = {"User-Agent": "Mozilla/5.0 (newsletter-agent-course)"}
@@ -192,8 +193,32 @@ def report(s: ReportIn) -> dict:               # ③ 취재·요약 — 기사 �
     return {"drafted": [{**it, "body": body[:6000], **draft(it, body)}],
             "log": [f"   취재 {it['source']} · 본문 {len(body)}자"]}
 
-def verify(s: dict) -> dict:                   # ④ 검수       — 섹션 7에서 채운다
-    return {"log": [f"④ 검수   {len(s['drafted'])}건 (빈 노드)"]}
+class Verdict(BaseModel):                       # 30장 검수 결과 스키마
+    ok:       bool      = Field(description="요약이 원문에 근거하면 true")
+    problems: list[str] = Field(description="근거 없는 부분. 없으면 빈 목록")
+
+# 무료 버전 — LLM 대조 대신 형식만 본다. 유료로 바꿀 땐 check 만 30장 코드로 갈아 끼운다
+# (practice/ch30_verify_openai.py). 무료 draft는 매체가 쓴 피드 요약을 그대로 쓰므로
+# 요약이 원문과 어긋나는 환각은 생기지 않는다. 대신 그대로 내보내면 안 되는 모양을 거른다.
+MIN_SUMMARY = 40                                # 이보다 짧은 요약은 내용이 없는 것으로 본다
+
+def check(d):
+    problems = []
+    if len(d["summary"].strip()) < MIN_SUMMARY:
+        problems.append(f"요약이 비었거나 너무 짧음 ({len(d['summary'].strip())}자)")
+    if d["summary"].strip() == d["headline"].strip():
+        problems.append("요약이 제목을 되풀이함")
+    if not d["url"].startswith(("http://", "https://")):
+        problems.append("원문 링크가 올바르지 않음")
+    return Verdict(ok=not problems, problems=problems)
+
+def verify(s: dict) -> dict:                   # ④ 검수 — 30장 구조 그대로
+    kept, dropped = [], []
+    for d in s["drafted"]:
+        (kept if check(d).ok else dropped).append(d)
+    return {"verified": kept,                  # 리듀서 없는 새 칸에 담는다
+            "log": [f"④ 검수   {len(s['drafted'])} → {len(kept)}건"
+                    + (f" · 불합격 {[x['source'] for x in dropped]}" if dropped else "")]}
 
 def publish(s: dict) -> dict:                  # ⑤ 발행       — 섹션 8에서 채운다
     return {"log": [f"⑤ 발행   {len(s['drafted'])}건 (빈 노드)"]}
@@ -211,7 +236,7 @@ def build():                                    # 노드를 이름으로 찾아 
     return g
 
 INIT = {"hours": 24,
-        "collected": [], "picked": [], "drafted": [], "log": []}
+        "collected": [], "picked": [], "drafted": [], "verified": [], "log": []}
 
 def run():
     return build().compile().invoke(INIT)
