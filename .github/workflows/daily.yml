@@ -30,3 +30,4 @@ jobs:
           OPENAI_API_KEY:      ${{ secrets.OPENAI_API_KEY }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           TZ: Asia/Seoul
+          DRY_RUN: "0"             # ⑤ 이 줄이 없으면 Actions에서는 한 번도 안 보낸다
