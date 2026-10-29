@@ -2,6 +2,7 @@ import json
 import operator
 import os
 import re
+import sys
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, TypedDict
 from urllib.parse import urlsplit
@@ -12,6 +13,10 @@ import trafilatura
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Send
 from pydantic import BaseModel, Field
+
+# Windows에서 출력을 파일·파이프로 넘기면 cp949로 인코딩돼 이모지·'—'에서 멈춘다. 출력은 늘 UTF-8로.
+if sys.stdout is not None and hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 class Brief(TypedDict):
     hours:     int                              # 수집 time window(시간)
@@ -58,10 +63,14 @@ def collect_hn(cutoff):                        # Hacker News는 RSS 대신 공�
     r.raise_for_status()
     items = []
     for h in r.json()["hits"]:
+        if not h.get("title"):                  # 제목 없는 글은 건너뛴다
+            continue
         url = h.get("url") or f"https://news.ycombinator.com/item?id={h['objectID']}"
+        # HN은 피드 요약이 없다. 본문은 재배포하지 않으므로 화제성과 원문 도메인으로 요약 칸을 채운다
         items.append({"title": h["title"], "url": url, "source": "Hacker News",
                       "at": datetime.fromtimestamp(h["created_at_i"], timezone.utc),
-                      "summary": f"Hacker News {h.get('points', 0)}점 · 댓글 {h.get('num_comments') or 0}개"})
+                      "summary": f"Hacker News에서 {h.get('points') or 0}점 · 댓글 {h.get('num_comments') or 0}개를 "
+                                 f"받은 글입니다. 원문: {urlsplit(url).netloc}"})
     return items
 
 def url_key(link):                             # utm_ 같은 추적용 꼬리표만 떼고 비교
@@ -74,11 +83,15 @@ def collect(s: dict) -> dict:                  # ① 자료 수집 — 2부(13�
     items, dead, seen = [], [], set()
     for name, url in SOURCES:
         try:
-            feed = feedparser.parse(requests.get(url, headers=UA, timeout=20).content)
+            r = requests.get(url, headers=UA, timeout=20)
+            r.raise_for_status()                # 403·500 오류 페이지를 '0건'이 아니라 '응답 없음'으로 센다
+            feed = feedparser.parse(r.content)
         except Exception:
             dead.append(name)                   # 한 곳이 죽어도 나머지는 계속
             continue
         for e in feed.entries:
+            if not e.get("link") or not e.get("title"):   # 링크나 제목이 빠진 글 하나로 전체가 멈추지 않게
+                continue
             at = published_at(e, KST if name in NAIVE_KST else timezone.utc)
             if not at or at < cutoff:           # time window 밖이거나 날짜가 없으면 버린다
                 continue
@@ -181,6 +194,8 @@ def draft(item, body):
             "why":      f"개발팀 관련: {' · '.join(found)}" if found else ""}
 
 def fan_report(s: dict):                        # 기사 수만큼 워커를 펼친다
+    if not s["picked"]:                         # 고른 게 없으면 바로 검수로 — 조용한 날 카드라도 보내려고
+        return "verify"
     return [Send("report", {"item": it}) for it in s["picked"]]
 
 def report(s: ReportIn) -> dict:               # ③ 취재·요약 — 기사 한 건을 맡는다
@@ -273,10 +288,14 @@ def publish(s: dict) -> dict:                 # ⑤ 발행 — 35장
              "url": a["url"], "source": a["source"], "topic": a.get("event", ""),
              "when": a["at"].astimezone(KST).strftime("%m-%d %H:%M")}   # 독자 기준 한국 시각으로
             for a in s["verified"]]
-    today = datetime.now().strftime("%Y-%m-%d")
-    sent  = send(today, make_lead(arts), arts,
-                 webhook=os.environ.get("DISCORD_WEBHOOK_URL"),
-                 dry_run=os.environ.get("DRY_RUN", "1") == "1")   # 기본은 보내지 않음
+    today   = datetime.now().strftime("%Y-%m-%d")
+    dry_run = os.environ.get("DRY_RUN", "1") != "0"   # "0"일 때만 보낸다 — 그 밖의 값은 모두 보내지 않음
+    webhook = os.environ.get("DISCORD_WEBHOOK_URL")
+    if not dry_run and not webhook:                    # 보내라고 했는데 주소가 없으면 실행을 실패로 끝낸다
+        raise RuntimeError("DRY_RUN=0 인데 DISCORD_WEBHOOK_URL 이 비어 있습니다")
+    sent  = send(today, make_lead(arts), arts, webhook=webhook, dry_run=dry_run)
+    if not dry_run and not sent:                       # Discord가 거절하면(4xx·5xx) 초록불로 끝나지 않게 한다
+        raise RuntimeError("Discord 발행 실패 — 위 '발행: 실패' 줄의 상태 코드를 확인하세요")
     label = f"{len(arts)}건" if arts else "조용합니다"
     return {"log": [f"⑤ 발행   {label} · {'보냄' if sent else 'dry-run'}"]}
 
@@ -286,7 +305,7 @@ def build():                                    # 노드를 이름으로 찾아 
         g.add_node(name, globals()[name])
     g.add_edge(START, "collect")
     g.add_edge("collect", "select")
-    g.add_conditional_edges("select", fan_report, ["report"])   # 기사 수만큼 report를 펼친다
+    g.add_conditional_edges("select", fan_report, ["report", "verify"])   # 기사 수만큼 report를 펼친다
     g.add_edge("report", "verify")
     g.add_edge("verify", "publish")
     g.add_edge("publish", END)

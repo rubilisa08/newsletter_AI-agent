@@ -15,6 +15,7 @@ graph TD;
 	collect --> select;
 	report --> verify;
 	select -.-> report;
+	select -.-> verify;
 	verify --> publish;
 	publish --> __end__;
 	classDef default fill:#f2f0ff,line-height:1.2
